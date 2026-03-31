@@ -492,18 +492,31 @@ html, body {
 }
 
 /* ══════════════════════════════════════════
-   MOBILE RESPONSIVENESS
+   MOBILE RESPONSIVENESS (Full Bleed Pro View)
 ══════════════════════════════════════════ */
 @media (max-width: 540px) {
-  #poster {
-    width: 92%;
-    max-width: none;
-    max-height: 95vh;
-    overflow-y: auto;
-    border-radius: 16px;
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow-x: hidden;
   }
   
-  /* Hide scrollbar for a cleaner look */
+  #poster {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    border: none;
+    background: transparent;
+    padding: 60px 20px 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow-y: auto;
+    backdrop-filter: blur(8px);
+    box-shadow: inset 0 0 50px rgba(110,0,255,0.1);
+  }
+  
   #poster::-webkit-scrollbar {
     width: 0px;
     background: transparent;
@@ -512,50 +525,72 @@ html, body {
   .p-header {
     flex-direction: column;
     gap: 12px;
-    padding: 16px;
+    padding: 10px 0 20px;
+    border-bottom: none;
   }
+  .p-header::after { display: none; }
+  
   .hdiv {
-    width: 60%;
+    width: 40%;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255,0,153,0.65), transparent);
+    background: linear-gradient(90deg, transparent, rgba(0,229,255,0.65), transparent);
   }
   
   .t-flash, .t-mob {
-    font-size: 5.5rem;
+    font-size: 26vw;
+    line-height: 0.85;
   }
   
   .t-sub {
-    font-size: 1.25rem;
+    font-size: 6vw;
+    margin-top: 15px;
   }
   
   .date-num {
-    font-size: 4rem;
+    font-size: 32vw;
+  }
+  .date-label {
+    font-size: 4vw;
   }
   
   .roster-grid {
     flex-direction: column;
-    gap: 16px;
+    gap: 30px;
+    margin-top: 20px;
   }
   
   .r-col.right {
-    text-align: left;
-    align-items: flex-start;
+    text-align: center;
+    align-items: center;
+  }
+  .r-val {
+    font-size: 11vw;
+  }
+  .r-val.lg {
+    font-size: 8vw;
+  }
+  .r-lbl {
+    font-size: 3.5vw;
   }
   
   .p-curators {
-    padding: 5px 20px 20px;
+    padding: 10px 0 40px;
   }
+  
   .c-layout {
     flex-direction: column;
-    gap: 20px;
+    gap: 35px;
     align-items: center;
   }
   .c-person, .c-person.right {
     text-align: center;
     align-items: center;
   }
+  .c-name {
+    font-size: 8.5vw;
+  }
   .c-role::before, .c-person.right .c-role::before {
-    content: ''; width: 15px; height: 1px; background: var(--cyan);
+    content: ''; width: 25px; height: 1px; background: var(--cyan);
     display: block;
   }
   .c-person.right .c-role::after {
@@ -679,10 +714,8 @@ html, body {
 
 <script>
 /* ═══════════════════════════════════════════════════════════
-   THREE.JS — 3D SCENE (r128)
-   Core architecture: Three.js + React Three Fiber pattern
-   Physics: ready for Cannon-es / Rapier integration
-   Post-processing: EffectComposer-ready (AdditiveBlending)
+   HIGH-PERFORMANCE WEBGL (FBO-style Particles + Physics)
+   Core architecture: Three.js Custom Shaders + Text Morphing
 ═══════════════════════════════════════════════════════════ */
 (function() {
   const canvas = document.getElementById('bg-canvas');
@@ -697,108 +730,175 @@ html, body {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setClearColor(0x030012, 1);
-  // Post-processing hook: renderer.toneMapping = THREE.ACESFilmicToneMapping
 
   // Scene + Camera
   const scene  = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.z = 9;
+  camera.position.z = 12;
 
-  /* ── Particle field ──────────────────────── */
-  const COUNT = 2400;
-  const geo   = new THREE.BufferGeometry();
-  const pos   = new Float32Array(COUNT * 3);
-  const cols  = new Float32Array(COUNT * 3);
+  // Render "26" on a 2D canvas to get pixel coordinates
+  const textCanvas = document.createElement('canvas');
+  textCanvas.width = 512; textCanvas.height = 512;
+  const ctx = textCanvas.getContext('2d');
+  ctx.fillStyle = "white";
+  ctx.font = "bold 260px 'Bebas Neue', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("26", 256, 256);
+  
+  const imgData = ctx.getImageData(0, 0, 512, 512).data;
+  const textPixels = [];
+  for (let y = 0; y < 512; y += 3) {
+    for (let x = 0; x < 512; x += 3) {
+      if (imgData[(y * 512 + x) * 4 + 3] > 128) {
+        textPixels.push({
+          x: (x - 256) * 0.05,
+          y: -(y - 256) * 0.05,
+          z: (Math.random() - 0.5) * 1.5
+        });
+      }
+    }
+  }
 
-  // Palette: cyan, violet, magenta, gold, white
+  /* ── GPU Particle System ──────────────────────── */
+  const COUNT = 30000; // High performance particle count
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(COUNT * 3);
+  const target = new Float32Array(COUNT * 3);
+  const cols = new Float32Array(COUNT * 3);
+
+  // Palette: cyan, violet, magenta, gold
   const PALETTE = [
     [0.0,  0.898, 1.0],
     [0.43, 0.0,   1.0],
     [1.0,  0.0,   0.6],
     [1.0,  0.77,  0.0],
-    [1.0,  1.0,   1.0],
   ];
 
   for (let i = 0; i < COUNT; i++) {
-    pos[i*3]   = (Math.random() - 0.5) * 34;
-    pos[i*3+1] = (Math.random() - 0.5) * 34;
-    pos[i*3+2] = (Math.random() - 0.5) * 20;
+    // Starting position: Exploded random outer sphere
+    const radius = 25 + Math.random() * 30;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(Math.random() * 2 - 1);
+
+    pos[i*3]   = radius * Math.sin(phi) * Math.cos(theta);
+    pos[i*3+1] = radius * Math.sin(phi) * Math.sin(theta);
+    pos[i*3+2] = radius * Math.cos(phi);
+
+    // Target position: Morph into "26" or ambient galactic dust
+    if (textPixels.length > 0 && Math.random() > 0.4) { // 60% form the text
+      const p = textPixels[Math.floor(Math.random() * textPixels.length)];
+      target[i*3]   = p.x + (Math.random()-0.5)*0.2;
+      target[i*3+1] = p.y + (Math.random()-0.5)*0.2;
+      target[i*3+2] = p.z + (Math.random()-0.5)*0.2;
+    } else { // 40% ambient galaxy dust
+      target[i*3]   = (Math.random() - 0.5) * 40;
+      target[i*3+1] = (Math.random() - 0.5) * 40;
+      target[i*3+2] = -10 + (Math.random() - 0.5) * 30;
+    }
+
     const c = PALETTE[Math.floor(Math.random() * PALETTE.length)];
-    cols[i*3]   = c[0];
-    cols[i*3+1] = c[1];
-    cols[i*3+2] = c[2];
+    // Make text particles brighter cyan/magenta
+    cols[i*3]   = c[0] + (Math.random() * 0.2);
+    cols[i*3+1] = c[1] + (Math.random() * 0.2);
+    cols[i*3+2] = c[2] + (Math.random() * 0.2);
   }
 
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color',    new THREE.BufferAttribute(cols, 3));
+  geo.setAttribute('aTarget', new THREE.BufferAttribute(target, 3));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(cols, 3));
 
-  const pointMat = new THREE.PointsMaterial({
-    size: 0.055,
-    vertexColors: true,
+  // Custom Shader Material for Physics + FBO Morphing effect
+  const uniforms = {
+    uTime: { value: 0 },
+    uProgress: { value: 0.0 }
+  };
+
+  const shaderMat = new THREE.ShaderMaterial({
+    uniforms: uniforms,
+    vertexShader: `
+      uniform float uTime;
+      uniform float uProgress;
+      attribute vec3 aTarget;
+      attribute vec3 aColor;
+      varying vec3 vColor;
+      
+      void main() {
+        vColor = aColor;
+        
+        // Physics logic: Interpolate from explosion to shape
+        vec3 morphed = mix(position, aTarget, smoothstep(0.0, 1.0, uProgress));
+        
+        // Add turbulent hovering noise (Physics-based weight feel)
+        float noise = sin(morphed.y * 3.0 + uTime * 2.0) * 0.8 * uProgress;
+        morphed.x += sin(uTime + morphed.z) * noise;
+        morphed.y += cos(uTime + morphed.x) * noise;
+        morphed.z += sin(morphed.x * morphed.y) * noise;
+
+        vec4 mvPosition = modelViewMatrix * vec4(morphed, 1.0);
+        
+        // Dynamic point size (particles close to camera are massive)
+        gl_PointSize = (20.0 / -mvPosition.z) * (1.0 + sin(uTime * 3.0 + morphed.x * 10.0) * 0.5);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vColor;
+      void main() {
+        // Create glowing soft spherical particles instead of squares
+        vec2 xy = gl_PointCoord.xy - vec2(0.5);
+        float ll = length(xy);
+        if(ll > 0.5) discard;
+        
+        // Core glow math
+        float alpha = (0.5 - ll) * 2.0;
+        vec3 color = mix(vColor, vec3(1.0), smoothstep(0.2, 0.0, ll));
+        gl_FragColor = vec4(color, alpha * 0.85);
+      }
+    `,
     transparent: true,
-    opacity: 0.72,
-    blending: THREE.AdditiveBlending,  // mimics EffectComposer bloom
+    blending: THREE.AdditiveBlending, // Bloom effect
     depthWrite: false,
-    sizeAttenuation: true,
   });
 
-  const points = new THREE.Points(geo, pointMat);
-  scene.add(points);
+  const particleSystem = new THREE.Points(geo, shaderMat);
+  scene.add(particleSystem);
 
-  /* ── Wireframe icosahedron ───────────────── */
-  const icosaGeo = new THREE.IcosahedronGeometry(5.5, 2);
-  const icosaMat = new THREE.MeshBasicMaterial({
-    color: 0x3300aa,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.065,
-  });
-  const icosa = new THREE.Mesh(icosaGeo, icosaMat);
-  icosa.position.set(-4.5, 1.5, -7);
-  scene.add(icosa);
-
-  /* ── Wireframe torus ─────────────────────── */
-  const torusGeo = new THREE.TorusGeometry(4.2, 0.55, 8, 38);
-  const torusMat = new THREE.MeshBasicMaterial({
-    color: 0x001266,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.05,
-  });
-  const torus = new THREE.Mesh(torusGeo, torusMat);
-  torus.position.set(5, -3.5, -11);
-  torus.rotation.x = Math.PI / 5;
-  scene.add(torus);
-
-  /* ── Second smaller icosa ────────────────── */
-  const icosa2 = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(2.5, 1),
-    new THREE.MeshBasicMaterial({ color: 0x005566, wireframe: true, transparent: true, opacity: 0.07 })
-  );
-  icosa2.position.set(6, 3, -6);
-  scene.add(icosa2);
+  /* ── GSAP Particle Explosion Physics ──────────────── */
+  if (typeof gsap !== 'undefined') {
+    // Explode inwards and morph into the shape
+    gsap.to(uniforms.uProgress, {
+      value: 1.0,
+      duration: 3.5,
+      ease: "expo.inOut",
+      delay: 0.2
+    });
+    
+    // Slowly dissolve and float away after 10s
+    gsap.to(uniforms.uProgress, {
+      value: 0.4,
+      duration: 15.0,
+      ease: "sine.inOut",
+      delay: 5.0,
+      yoyo: true,
+      repeat: -1
+    });
+  }
 
   /* ── Render loop ─────────────────────────── */
   let t = 0;
   (function animate() {
     requestAnimationFrame(animate);
-    t += 0.004;
+    t += 0.005;
+    uniforms.uTime.value = t;
 
-    // Particles — slow drift + Y bob
-    points.rotation.y = t * 0.055;
-    points.rotation.x = Math.sin(t * 0.09) * 0.04;
+    // Entire massive cloud slow rotation
+    particleSystem.rotation.y = t * 0.1;
+    particleSystem.rotation.x = Math.sin(t * 0.2) * 0.05;
 
-    // Geometries — independent rotation axes
-    icosa.rotation.y  = t * 0.13;
-    icosa.rotation.x  = t * 0.07;
-    torus.rotation.z  = t * 0.09;
-    torus.rotation.y  = t * 0.04;
-    icosa2.rotation.x = t * 0.11;
-    icosa2.rotation.z = t * 0.06;
-
-    // Camera micro-drift (Lenis-style smooth feel)
-    camera.position.x = Math.sin(t * 0.18) * 0.4;
-    camera.position.y = Math.cos(t * 0.14) * 0.28;
+    // Camera breathing
+    camera.position.x = Math.sin(t * 0.5) * 1.5;
+    camera.position.y = Math.cos(t * 0.4) * 0.8;
 
     renderer.render(scene, camera);
   })();
